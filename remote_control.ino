@@ -9,14 +9,14 @@
 
 
 // Constants for pin numbers:
-const int dmsEnablePin = 9;       // pin for DMS enable switch
-const int dmsDeadLED = 8;         // pin to signal DMS 'Dead' state
-const int dmsAliveLED = 7;        // pin to signal DMS 'Alive' state
+const int dmsEnablePin = 7;       // pin for DMS enable switch
+const int dmsDeadLED = 3;         // pin to signal DMS 'Dead' state
+const int dmsAliveLED = 2;        // pin to signal DMS 'Alive' state
 const int dmsLiveButton = 6;      // pin to receive 'StayAlive' button signal
-const int dmsDisabledLED = 5;     // pin to signal DMS is disabled
-const int haltLED = 4;            // pin to signal 'Halt' state is engaged
+const int dmsDisabledLED = 4;     // pin to signal DMS is disabled
+const int haltLED = 5;            // pin to signal 'Halt' state is engaged
 const int haltButton = 6;         // pin to receive 'Halt' button signal
-const int manualControlPin = 10;  // pin to enable joystick manual control
+const int manualControlPin = A3;  // pin to enable joystick manual control
 const int joystickXPin = A0;      // pin for joystick left/right
 const int joystickYPin = A1;      // pin for joystick forward/reverse
 
@@ -36,10 +36,10 @@ void setup() {
     pinMode(dmsEnablePin, INPUT);
     pinMode(dmsDeadLED, OUTPUT);
     pinMode(dmsAliveLED, OUTPUT);
-    pinMode(dmsLiveButton, INPUT);
+    pinMode(dmsLiveButton, INPUT);    // this will also function as the 'Halt' button
     pinMode(dmsDisabledLED, OUTPUT);
     pinMode(haltLED, OUTPUT);
-    //pinMode(haltButton, INPUT);
+    pinMode(manualControlPin, INPUT);
     pinMode(joystickXPin, INPUT);
     pinMode(joystickYPin, INPUT);
 
@@ -51,7 +51,7 @@ void loop() {
     // First check if the DMS enable switch is on:
     dmsEnableState = digitalRead(dmsEnablePin);
     
-    if (dmsEnableState == HIGH) {
+    if (dmsEnableState == LOW) {
         Serial.print("DMS is enabled.");
         digitalWrite(dmsDisabledLED, LOW);
         digitalWrite(haltLED, LOW);
@@ -73,7 +73,7 @@ void loop() {
             Serial.print("\t DMS button is open (Die!)\n");
         }
     }
-    if (dmsEnableState == LOW) {
+    if (dmsEnableState == HIGH) {
         
         // If the DMS is not enabled, turn off DMS LEDs, turn on 'DMS OFF' indicator:
         digitalWrite(dmsDisabledLED, HIGH);
