@@ -118,57 +118,46 @@
 #include <RFM69.h>    //get it here: https://www.github.com/lowpowerlab/rfm69
 #include <SPI.h>
 
-//#define NETWORKID     100  // The same on all nodes that talk to each other
 const unsigned char NETWORKID = 100; // must be the same for all nodes (0-255)
-//#define NODEID        2    // The unique identifier of this node
 const unsigned char NODEID = 2; // my node ID (0-255)
-//#define RECEIVER      255    // The recipient of packets
 const unsigned char RECEIVER = 255;
-//#define FREQUENCY     RF69_433MHZ
-//#define FREQUENCY     RF69_868MHZ
-//#define FREQUENCY     RF69_915MHZ
 const unsigned char FREQUENCY = RF69_915MHZ;
 #define ENCRYPTKEY    "sampleEncryptKey" //exactly the same 16 characters/bytes on all nodes!
-
 #define IS_RFM69HCW   true // set to 'true' if you are using an RFM69HCW module
-
 #define SERIAL_BAUD   115200
-
 #define RFM69_CS      8
 #define RFM69_IRQ     2
 #define RFM69_IRQN    0  // Pin 2 is IRQ 0!
 #define RFM69_RST     9
-#define LED           13  // onboard blinky
+//#define LED           13  // onboard blinky
 
 RFM69 radio = RFM69(RFM69_CS, RFM69_IRQ, IS_RFM69HCW, RFM69_IRQN);
 
 // Constants for pin numbers:
-const int dmsEnablePin = 7;       // pin for DMS enable switch
-const int dmsDeadLED = 3;         // pin to signal DMS 'Dead' state
-const int dmsAliveLED = A2;        // pin to signal DMS 'Alive' state
-const int dmsLiveButton = 6;      // pin to receive 'StayAlive' button signal
-const int dmsDisabledLED = 4;     // pin to signal DMS is disabled
-const int haltLED = 5;            // pin to signal 'Halt' state is engaged
-const int haltButton = 6;         // pin to receive 'Halt' button signal
-const int manualControlPin = A3;  // pin to enable joystick manual control
-const int joystickXPin = A0;      // pin for joystick left/right
-const int joystickYPin = A1;      // pin for joystick forward/reverse
+const int PIN_DEAD_MAN_EN_SW = 7;       // pin for DMS enable switch
+const int PIN_DEAD_MAN_ON_LED = 3;         // pin to signal DMS 'Dead' state
+const int PIN_DEAD_MAN_OFF_LED = A2;        // pin to signal DMS 'Alive' state
+const int PIN_MOMENTARY_BUTTON = 6;      // pin for momentary push button
+const int PIN_DEAD_MAN_DISABLED_LED = 4;     // pin to signal DMS is disabled
+const int PIN_HALT_LED = 5;            // pin to signal 'Halt' state is engaged
+const int PIN_MANUAL_CTRL_SW = A3;  // pin to enable joystick manual control
+const int PIN_JOYSTICK_X = A0;      // pin for joystick left/right
+const int PIN_JOYSTICK_Y = A1;      // pin for joystick forward/reverse
 
 // Variables:
 int dmsEnableState = 0;           // variable for whether the DMS is enabled
-int dmsButtonState = 0;           // variable for whether the DMS button is depressed
+int momentaryButtonPushed = 0;           // variable for reading momentary button
 
 const bool HALTED = true;
 const bool NOT_HALTED = false;
 
 bool haltState = HALTED;                // variable for current halt state
-int haltButtonState = 0;          // variable for reading halt button
-int manualControlState = 0;       // variable for manual control
-int joystickXValue = 0;           // variable for left/right
-int joystickYValue = 0;           // variable for forward/reverse
+int joystickControlState = 0;       // variable for joystick control
+int joystickValueX = 0;           // variable for left/right
+int joystickValueY = 0;           // variable for forward/reverse
 
-int mappedX;
-int mappedY;
+int mappedJoystickX;
+int mappedJoystickY;
 
 enum RadioModes {
     NO_MOTION = 0,
@@ -188,7 +177,7 @@ unsigned char radiopacket[RADIO_PACKET_LEN];
 void sendControlOutput(unsigned char m, unsigned char l, unsigned char r) {
     radiopacket[0] = 'm';
     radiopacket[1] = ':';
-    radiopacket[2] = m;  // motion is disabled
+    radiopacket[2] = m;  //
     radiopacket[3] = ',';
     radiopacket[4] = 'l';
     radiopacket[5] = ':';
@@ -198,8 +187,13 @@ void sendControlOutput(unsigned char m, unsigned char l, unsigned char r) {
     radiopacket[9] = ':';
     radiopacket[10] = r;
     radiopacket[11] = ';';
-    //String packet(radiopacket);
-    //Serial.print("Sending "); Serial.println(packet);
+
+    Serial.print("Sending: ");
+    for(int i = 0; i < RADIO_PACKET_LEN; i++) {
+        Serial.print(radiopacket[i]);
+        Serial.print(",");
+    }
+    Serial.print("\n");
 
     //target node Id, message as string or byte array, message length
     if (radio.sendWithRetry(RECEIVER, radiopacket, RADIO_PACKET_LEN)) {
@@ -211,18 +205,16 @@ void sendControlOutput(unsigned char m, unsigned char l, unsigned char r) {
 }
 
 void setup() {
-    Serial.print("\n");
-  
     // Initialize GPIO pins for their functions:
-    pinMode(dmsEnablePin, INPUT);
-    pinMode(dmsDeadLED, OUTPUT);
-    pinMode(dmsAliveLED, OUTPUT);
-    pinMode(dmsLiveButton, INPUT);    // this will also function as the 'Halt' button
-    pinMode(dmsDisabledLED, OUTPUT);
-    pinMode(haltLED, OUTPUT);
-    pinMode(manualControlPin, INPUT);
-    pinMode(joystickXPin, INPUT);
-    pinMode(joystickYPin, INPUT);
+    pinMode(PIN_DEAD_MAN_EN_SW, INPUT);
+    pinMode(PIN_DEAD_MAN_ON_LED, OUTPUT);
+    pinMode(PIN_DEAD_MAN_OFF_LED, OUTPUT);
+    pinMode(PIN_MOMENTARY_BUTTON, INPUT);
+    pinMode(PIN_DEAD_MAN_DISABLED_LED, OUTPUT);
+    pinMode(PIN_HALT_LED, OUTPUT);
+    pinMode(PIN_MANUAL_CTRL_SW, INPUT);
+    pinMode(PIN_JOYSTICK_X, INPUT);
+    pinMode(PIN_JOYSTICK_Y, INPUT);
 
     // Initialize serial:
     Serial.begin(SERIAL_BAUD);
@@ -241,28 +233,26 @@ void setup() {
     }
     radio.setPowerLevel(31); // power output ranges from 0 (5dBm) to 31 (20dBm)
     radio.encrypt(ENCRYPTKEY);
-    pinMode(LED, OUTPUT);
-    Serial.print("\nTransmitting at ");
-    Serial.print(FREQUENCY==RF69_433MHZ ? 433 : FREQUENCY==RF69_868MHZ ? 868 : 915);
-    Serial.println(" MHz");
+    //pinMode(LED, OUTPUT);
+    Serial.println("\nTransmitting at 915 MHz");
 }
 
 void loop() {
     // First check if the DMS enable switch is on (red covered switch is in closed/down position):
-    dmsEnableState = digitalRead(dmsEnablePin);
+    dmsEnableState = digitalRead(PIN_DEAD_MAN_EN_SW);
 
     // No motion unless dead man button is held down continuously.
     if (dmsEnableState == LOW) {
         //Serial.print("DMS is enabled.");
-        digitalWrite(dmsDisabledLED, LOW);  // turn off blue LED
-        digitalWrite(haltLED, LOW);  //  turn off yellow LED
+        digitalWrite(PIN_DEAD_MAN_DISABLED_LED, LOW);  // turn off blue LED
+        digitalWrite(PIN_HALT_LED, LOW); //  turn off yellow LED
         // Now check if DMS button is depressed:
-        dmsButtonState = digitalRead(dmsLiveButton);
+        momentaryButtonPushed = digitalRead(PIN_MOMENTARY_BUTTON);
         // If DMS is enabled and DMS button is depressed, cancel 'Die' signal 
         // and send 'Alive' signal:
-        if (dmsButtonState == HIGH) {
-            digitalWrite(dmsDeadLED, LOW);  // turn off red LED
-            digitalWrite(dmsAliveLED, HIGH);  // turn on green LED
+        if (momentaryButtonPushed == HIGH) {
+            digitalWrite(PIN_DEAD_MAN_ON_LED, LOW);  // turn off red LED
+            digitalWrite(PIN_DEAD_MAN_OFF_LED, HIGH);  // turn on green LED
             //Serial.print("\t DMS button is depressed (stay alive)\n");
             mode = AUTONOMOUS; // m1 allows autonomous motion
             motorLeft = SPEED_STOP; // the system should disregard this value in m1, we but we send 128 anyway
@@ -272,12 +262,12 @@ void loop() {
         } else {
             // If DMS is enabled and DMS is not depressed, cancel 'Alive' 
             // signal and send 'Die' signal:
-            digitalWrite(dmsAliveLED, LOW);  // turn off green LED
-            digitalWrite(dmsDeadLED, HIGH);  // turn on red LED
+            digitalWrite(PIN_DEAD_MAN_OFF_LED, LOW);  // turn off green LED
+            digitalWrite(PIN_DEAD_MAN_ON_LED, HIGH);  // turn on red LED
             //Serial.print("\t DMS button is open (Die)\n");
-            mode = NO_MOTION; // m1 allows autonomous motion
-            motorLeft = SPEED_STOP; // the system should disregard this value in m0,  but we send 128 anyway
-            motorRight = SPEED_STOP; // the system should disregard this value in m0, but we send 128 anyway
+            mode = NO_MOTION; // m0 disables all motion
+            motorLeft = SPEED_STOP;
+            motorRight = SPEED_STOP;
             sendControlOutput(mode, motorLeft, motorRight);
         }
     }
@@ -285,69 +275,69 @@ void loop() {
     // Motion is enabled and disabled by toggling the halt button (momentary press)
     if (dmsEnableState == HIGH) {
         // If the DMS is not enabled (red covered switch is uncovered and up), turn off DMS LEDs, turn on 'DMS OFF' indicator:
-        digitalWrite(dmsDisabledLED, HIGH);  // turn on blue LED
-        digitalWrite(dmsAliveLED, LOW);  // turn off green LED
-        digitalWrite(dmsDeadLED, LOW);  //  turn off red LED
+        digitalWrite(PIN_DEAD_MAN_DISABLED_LED, HIGH);  // turn on blue LED
+        digitalWrite(PIN_DEAD_MAN_OFF_LED, LOW);  // turn off green LED
+        digitalWrite(PIN_DEAD_MAN_ON_LED, LOW);  //  turn off red LED
         //Serial.print("DMS is disabled.");
         // Check if halt button has been pushed, if so, toggle halt state:
-        haltButtonState = digitalRead(haltButton);
-        if (haltButtonState == HIGH) {
+        momentaryButtonPushed = digitalRead(PIN_MOMENTARY_BUTTON);
+        if (momentaryButtonPushed == HIGH) {
             haltState = !haltState;
             // For de-bouncing the push button.  don't hold it down for more
             // than half a second, push it once.
             delay(500);
         }
 
-        digitalWrite(haltLED, haltState);
+        digitalWrite(PIN_HALT_LED, haltState);
         if (haltState == HALTED) {
             //Serial.print("\t HALT!");
-            mode = NO_MOTION; // m1 allows autonomous motion
-
-            // The system should disregard this value in m1, we but we send 128 anyway.
+            mode = NO_MOTION;
             motorLeft = SPEED_STOP;
-            motorRight = SPEED_STOP; // the system should disregard this value in m1, but we send 128 anyway
+            motorRight = SPEED_STOP;
             sendControlOutput(mode, motorLeft, motorRight);
         }
         // Check if manual control switch is on (blue covered switch is up):
-        manualControlState = digitalRead(manualControlPin);
+        joystickControlState = digitalRead(PIN_MANUAL_CTRL_SW);
 
-
-        if (manualControlState == LOW) {
+        if (joystickControlState == LOW) {
             //Serial.print("\t Manual-Control Disabled. Continuous-Autonomous Enabled");
             // Autonomous movement enabled (m:1) if not halted, but (m:0) if it is halted.
-            mode = (unsigned char)(!haltState);
-            // The system should disregard this value in this mode, we but we send 128 anyway
-            motorLeft = SPEED_STOP;
-            // The system should disregard this value in this mode, but we send 128 anyway
-            motorRight = SPEED_STOP;
-            sendControlOutput(mode, motorLeft, motorRight); 
-        } else {
-            //Serial.print("\t Manual Control Enabled.");
+            if (haltState == HALTED) {
+                mode = NO_MOTION;
+                motorLeft = SPEED_STOP;
+                motorRight = SPEED_STOP;
+                sendControlOutput(mode, motorLeft, motorRight);
+            } else if (haltState == NOT_HALTED){
+                mode = AUTONOMOUS;
+                motorLeft = SPEED_STOP;
+                motorRight = SPEED_STOP;
+                sendControlOutput(mode, motorLeft, motorRight);
+            }
         }
 
         // IF DMS is off and manual control is on BUT the state is in HALT, disable motion
-        if (manualControlState == HIGH and haltState == HALTED) {
-            mode = NO_MOTION; // m1 allows autonomous motion
-            motorLeft = SPEED_STOP; // the system should disregard this value in this mode, we but we send 128 anyway
-            motorRight = SPEED_STOP; // the system should disregard this value in this mode, but we send 128 anyway
+        if (joystickControlState == HIGH && haltState == HALTED) {
+            mode = NO_MOTION;
+            motorLeft = SPEED_STOP;
+            motorRight = SPEED_STOP;
             sendControlOutput(mode, motorLeft, motorRight);       
         }
 
         // If DMS is off and manual control switch is on and not halted, read 
         // and report joystick values:
-        if (manualControlState == HIGH and haltState == NOT_HALTED) {
-            joystickXValue = analogRead(joystickXPin);
-            joystickYValue = analogRead(joystickYPin);
-            int mappedX = map(joystickXValue, 0, 1023, 0, 255);
-            int mappedY = map(joystickYValue, 0, 1023, 0, 255);
+        if (joystickControlState == HIGH and haltState == NOT_HALTED) {
+            joystickValueX = analogRead(PIN_JOYSTICK_X);
+            joystickValueY = analogRead(PIN_JOYSTICK_Y);
+            int mappedJoystickX = map(joystickValueX, 0, 1023, 0, 255);
+            int mappedJoystickY = map(joystickValueY, 0, 1023, 0, 255);
 
             /*
-            float mathX = (mappedX - 128);
-            float mathY = (mappedY - 128);
-            Serial.print("\tmappedX: ");
-            Serial.print(mappedX);
-            Serial.print("\tmappedY: ");
-            Serial.print(mappedY);
+            float mathX = (mappedJoystickX - 128);
+            float mathY = (mappedJoystickY - 128);
+            Serial.print("\tmappedJoystickX: ");
+            Serial.print(mappedJoystickX);
+            Serial.print("\tmappedJoystickY: ");
+            Serial.print(mappedJoystickY);
             float toa = (mathY/mathX);
             Serial.print("\ttoa: ");
             Serial.print(toa);
@@ -359,7 +349,7 @@ void loop() {
             
             // 19 joystick zones
             // central deadzone
-            if ((mappedX > 124 and mappedX < 132) and (mappedY > 124 and mappedY < 132)) {
+            if ((mappedJoystickX > 124 and mappedJoystickX < 132) and (mappedJoystickY > 124 and mappedJoystickY < 132)) {
                 //Serial.print("\t Joystick is in deadzone \t");
                 motorLeft = SPEED_STOP;
                 motorRight = SPEED_STOP;
@@ -367,138 +357,137 @@ void loop() {
                 mode = HAND_CONTROL;
                 sendControlOutput(mode, motorLeft, motorRight);
             }
-        }
 
-        // Quadrant FR
-        if ((mappedX >131) and (mappedY > 131)) {
-            //Serial.print("\t Q=FR\t");
-            float mathX = (mappedX - SPEED_STOP);
-            float mathY = (mappedY - SPEED_STOP);
+            // Quadrant FR
+            if ((mappedJoystickX >131) and (mappedJoystickY > 131)) {
+                //Serial.print("\t Q=FR\t");
+                float mathX = (mappedJoystickX - SPEED_STOP);
+                float mathY = (mappedJoystickY - SPEED_STOP);
 
-            // Corresponds to angles: 79-90, ie hard right
-            if((mathY / mathX) < 0.194) {
+                // Corresponds to angles: 79-90, ie hard right
+                if((mathY / mathX) < 0.194) {
                 //Serial.print("\t going CW\t");
-                motorLeft = mappedX;
-                motorRight = map(mappedX, SPEED_STOP, 255, SPEED_STOP, 0);
-            } else if ((mathY/mathX) < 0.424) {  //  corresponds to angles 67-79, ie above hard-right, pivot zone
-                //Serial.print("\t about to go CW\t");
-                motorLeft = map(mappedX, SPEED_STOP, 255, 128, 165);
-                motorRight = SPEED_STOP;
-            } else if ((mathY/mathX) < 1) {  //  corresponds to angles 45-67, tightest forward right arc
-                //Serial.print("\t FR, about to pivot");
-                motorLeft = map(mappedY, SPEED_STOP, 235, 128, 201);
-                motorRight = map(mappedY, SPEED_STOP, 235, 128, 149);
-            } else if ((mathY/mathX) < 2.47) {  // corresponds to angles 22-45, forward/right arc
-                //Serial.print("\t FR");
-                motorLeft = map(mappedY, 128, 254, 128, 218);
-                motorRight = map(mappedY, 128, 255, 128, 192);
-            } else {
-                //Serial.print("\t FF-R");  //  corresponds to angles 0-22,
-                motorLeft = map(mappedY, 128, 255, 128, 255);
-                motorRight = map(mappedY, 128, 255, 128, 255);
-            }
+                    motorLeft = mappedJoystickX;
+                    motorRight = map(mappedJoystickX, SPEED_STOP, 255, SPEED_STOP, 0);
+                } else if ((mathY/mathX) < 0.424) {  //  corresponds to angles 67-79, ie above hard-right, pivot zone
+                    //Serial.print("\t about to go CW\t");
+                    motorLeft = map(mappedJoystickX, SPEED_STOP, 255, 128, 165);
+                    motorRight = SPEED_STOP;
+                } else if ((mathY/mathX) < 1) {  //  corresponds to angles 45-67, tightest forward right arc
+                    //Serial.print("\t FR, about to pivot");
+                    motorLeft = map(mappedJoystickY, SPEED_STOP, 235, 128, 201);
+                    motorRight = map(mappedJoystickY, SPEED_STOP, 235, 128, 149);
+                } else if ((mathY/mathX) < 2.47) {  // corresponds to angles 22-45, forward/right arc
+                    //Serial.print("\t FR");
+                    motorLeft = map(mappedJoystickY, 128, 254, 128, 218);
+                    motorRight = map(mappedJoystickY, 128, 255, 128, 192);
+                } else {
+                    //Serial.print("\t FF-R");  //  corresponds to angles 0-22,
+                    motorLeft = map(mappedJoystickY, 128, 255, 128, 255);
+                    motorRight = map(mappedJoystickY, 128, 255, 128, 255);
+                }
 
-            //now send this data over radio 
-            mode = HAND_CONTROL;
-            sendControlOutput(mode, motorLeft, motorRight); 
-        } // End forward right quadrant.
+                //now send this data over radio
+                mode = HAND_CONTROL;
+                sendControlOutput(mode, motorLeft, motorRight);
+            } // End forward right quadrant.
             
-        // Quadrant BL
-        if ((mappedX > 127) and (mappedY < 128)) {
-            //Serial.print("\t Q=BL\t");
-            float mathX = (mappedX - 128);
-            float mathY = (128 -mappedY);
-            if((mathY / mathX) < .194) {
-                //Serial.print("\t going CW\t");
-                motorLeft = mappedX;
-                motorRight = map(mappedX, 128, 255, 128, 0);
-            } else if ((mathY/mathX) < 0.424) {
-                //Serial.print("\t about to go CW\t");
-                motorLeft = map(mappedX, 128, 255, 128, 88);
-                motorRight = 128;
-            } else if ((mathY/mathX) < 1) {
-                //Serial.print("\t BL-P, about to pivot");
-                motorLeft = map(mappedY, 128, 36, 128, 54);
-                motorRight = map(mappedY, 128, 36, 128, 106);
-            } else if ((mathY/mathX) < 2.47) {
-                //Serial.print("\t BL");
-                motorLeft = map(mappedY, 128, 12, 128, 37);
-                motorRight = map(mappedY, 128, 12, 128, 63);
-            } else  {
-                //Serial.print("\t BB-L");
-                motorLeft = map(mappedY, 128, 0, 128, 0);
-                motorRight = map(mappedY, 128, 0, 128, 0);
-            }
+            // Quadrant BL
+            if ((mappedJoystickX > 127) and (mappedJoystickY < 128)) {
+                //Serial.print("\t Q=BL\t");
+                float mathX = (mappedJoystickX - 128);
+                float mathY = (128 -mappedJoystickY);
+                if((mathY / mathX) < .194) {
+                    //Serial.print("\t going CW\t");
+                    motorLeft = mappedJoystickX;
+                    motorRight = map(mappedJoystickX, 128, 255, 128, 0);
+                } else if ((mathY/mathX) < 0.424) {
+                    //Serial.print("\t about to go CW\t");
+                    motorLeft = map(mappedJoystickX, 128, 255, 128, 88);
+                    motorRight = 128;
+                } else if ((mathY/mathX) < 1) {
+                  //Serial.print("\t BL-P, about to pivot");
+                    motorLeft = map(mappedJoystickY, 128, 36, 128, 54);
+                    motorRight = map(mappedJoystickY, 128, 36, 128, 106);
+                } else if ((mathY/mathX) < 2.47) {
+                    //Serial.print("\t BL");
+                    motorLeft = map(mappedJoystickY, 128, 12, 128, 37);
+                    motorRight = map(mappedJoystickY, 128, 12, 128, 63);
+                } else  {
+                    //Serial.print("\t BB-L");
+                    motorLeft = map(mappedJoystickY, 128, 0, 128, 0);
+                    motorRight = map(mappedJoystickY, 128, 0, 128, 0);
+                }
 
-            // Now send this data over radio
-            mode = HAND_CONTROL;
-            sendControlOutput(mode, motorLeft, motorRight);
-        } // End Quadrant BL
+                // Now send this data over radio
+                mode = HAND_CONTROL;
+                sendControlOutput(mode, motorLeft, motorRight);
+            } // End Quadrant BL
                     
-        // Quadrant BR
-        if ((mappedX < 128) and (mappedY < 128)) {
-            Serial.print("\t Q=BR\t");
-            float mathX = (128 - mappedX);
-            float mathY = (128 - mappedY);
+            // Quadrant BR
+            if ((mappedJoystickX < 128) and (mappedJoystickY < 128)) {
+                Serial.print("\t Q=BR\t");
+                float mathX = (128 - mappedJoystickX);
+                float mathY = (128 - mappedJoystickY);
               
-            if((mathY / mathX) < 0.018) {
-                //Serial.print("\t going CCW\t");
-                motorLeft = mappedX;
-                motorRight = map(mappedX, 128, 0, 128, 255);
-            } else if ((mathY / mathX) < 0.424) {
-                //Serial.print("\t about to go CCW\t");
-                motorLeft = map(mappedX, 128, 31, 128, 88);
-                motorRight = 128;
-            } else if ((mathY / mathX) < 1.0) {
-                //Serial.print("\t BR-P, about to pivot");
-                motorLeft = map(mappedY, 128, 54, 128, 106);
-                motorRight = map(mappedY, 128, 54, 128, 54);
-            } else if ((mathY / mathX) < 2.47) {
-                //Serial.print("\t BR");
-                motorLeft = map(mappedY, 128, 27, 128, 63);
-                motorRight = map(mappedY, 128, 27, 128, 37);
-            } else {
-                //Serial.print("\t BB-R");
-                motorLeft = map(mappedY, 128, 0, 128, 0);
-                motorRight = map(mappedY, 128, 0, 128, 0);
+                if((mathY / mathX) < 0.018) {
+                    //Serial.print("\t going CCW\t");
+                    motorLeft = mappedJoystickX;
+                    motorRight = map(mappedJoystickX, 128, 0, 128, 255);
+                } else if ((mathY / mathX) < 0.424) {
+                    //Serial.print("\t about to go CCW\t");
+                    motorLeft = map(mappedJoystickX, 128, 31, 128, 88);
+                    motorRight = 128;
+                } else if ((mathY / mathX) < 1.0) {
+                    //Serial.print("\t BR-P, about to pivot");
+                    motorLeft = map(mappedJoystickY, 128, 54, 128, 106);
+                    motorRight = map(mappedJoystickY, 128, 54, 128, 54);
+                } else if ((mathY / mathX) < 2.47) {
+                    //Serial.print("\t BR");
+                    motorLeft = map(mappedJoystickY, 128, 27, 128, 63);
+                    motorRight = map(mappedJoystickY, 128, 27, 128, 37);
+                } else {
+                    //Serial.print("\t BB-R");
+                    motorLeft = map(mappedJoystickY, 128, 0, 128, 0);
+                    motorRight = map(mappedJoystickY, 128, 0, 128, 0);
             }
-            // Now send this data over radio::
-            mode = HAND_CONTROL;
-            sendControlOutput(mode, motorLeft, motorRight);
-        } // End Quadrant BR.
+                // Now send this data over radio::
+                mode = HAND_CONTROL;
+                sendControlOutput(mode, motorLeft, motorRight);
+            } // End Quadrant BR.
 
-        // Quadrant FL
-        if ((mappedX < 128) and (mappedY > 127)) {
-              //Serial.print("\t Q=FL\t");
-              float mathX = (128 - mappedX);
-              float mathY = (mappedY - 128); 
-              if((mathY/mathX) < 0.199) {
-                  //Serial.print("\t going CCW\t");
-                  motorLeft = mappedX;
-                  motorRight = map(mappedX, 128, 0, 128, 255);
-              } else if ((mathY/mathX) < 0.424) {
-                  //Serial.print("\t about to go CW\t");
-                  motorLeft = 128;
-                  motorRight = map(mappedX, 128, 0, 128, 165);
-              } else if ((mathY/mathX) < 1.0) {
-                  //Serial.print("\t FR, about to pivot");
-                  motorLeft = map(mappedY, 128, 212, 128, 149);
-                  motorRight = map(mappedY, 128, 212, 128, 201);
-              } else if ((mathY / mathX) < 2.47) {
-                  //Serial.print("\t FR");
-                  motorLeft = map(mappedY, 128, 244, 128, 192);
-                  motorRight = map(mappedY, 128, 244, 128, 218);
-              } else {
-                  //Serial.print("\t FF-R");
-                  motorLeft = map(mappedY, 128, 255, 128, 255);
-                  motorRight = map(mappedY, 128, 255, 128, 255);
-             }
+            // Quadrant FL
+            if ((mappedJoystickX < 128) and (mappedJoystickY > 127)) {
+                  //Serial.print("\t Q=FL\t");
+                  float mathX = (128 - mappedJoystickX);
+                  float mathY = (mappedJoystickY - 128);
+                  if((mathY/mathX) < 0.199) {
+                      //Serial.print("\t going CCW\t");
+                      motorLeft = mappedJoystickX;
+                      motorRight = map(mappedJoystickX, 128, 0, 128, 255);
+                  } else if ((mathY/mathX) < 0.424) {
+                      //Serial.print("\t about to go CW\t");
+                      motorLeft = 128;
+                      motorRight = map(mappedJoystickX, 128, 0, 128, 165);
+                  } else if ((mathY/mathX) < 1.0) {
+                      //Serial.print("\t FR, about to pivot");
+                      motorLeft = map(mappedJoystickY, 128, 212, 128, 149);
+                      motorRight = map(mappedJoystickY, 128, 212, 128, 201);
+                  } else if ((mathY / mathX) < 2.47) {
+                      //Serial.print("\t FR");
+                      motorLeft = map(mappedJoystickY, 128, 244, 128, 192);
+                      motorRight = map(mappedJoystickY, 128, 244, 128, 218);
+                  } else {
+                      //Serial.print("\t FF-R");
+                      motorLeft = map(mappedJoystickY, 128, 255, 128, 255);
+                      motorRight = map(mappedJoystickY, 128, 255, 128, 255);
+                 }
 
-            //now send this data over radio 
-            mode = HAND_CONTROL;
-            sendControlOutput(mode, motorLeft, motorRight); 
-        } // End Quadrant FL.
+                //now send this data over radio
+                mode = HAND_CONTROL;
+                sendControlOutput(mode, motorLeft, motorRight);
+            } // End Quadrant FL.
+        }
     }
 }
-
 
