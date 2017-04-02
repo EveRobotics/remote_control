@@ -157,7 +157,12 @@ const int joystickYPin = A1;      // pin for joystick forward/reverse
 // Variables:
 int dmsEnableState = 0;           // variable for whether the DMS is enabled
 int dmsButtonState = 0;           // variable for whether the DMS button is depressed
-int haltState = 1;                // variable for current halt state
+
+const bool HALTED = true;
+const bool NOT_HALTED = false;
+
+
+bool haltState = HALTED;                // variable for current halt state
 int haltButtonState = 0;          // variable for reading halt button
 int manualControlState = 0;       // variable for manual control
 int joystickXValue = 0;           // variable for left/right
@@ -165,31 +170,47 @@ int joystickYValue = 0;           // variable for forward/reverse
 
 int mappedX;
 int mappedY;
-int mode;
-int motorLeft;
-int motorRight;
 
-char radiopacket[12] = "";
+enum RadioModes {
+    NO_MOTION = 0,
+    AUTONOMOUS = 1,
+    HAND_CONTROL = 2,
+};
 
-void sendControlOutput(char mode, char motorLeft, char motorRight) {
+unsigned char mode = 0;
+const unsigned char SPEED_STOP = 128;
+
+unsigned char motorLeft = SPEED_STOP;
+unsigned char motorRight = SPEED_STOP;
+
+const unsigned char RADIO_PACKET_LEN = 12;
+unsigned char radiopacket[RADIO_PACKET_LEN];
+
+
+
+void sendControlOutput(unsigned char m, unsigned char l, unsigned char r) {
     radiopacket[0] = 'm';
     radiopacket[1] = ':';
-    radiopacket[2] = (char)mode;  // motion is disabled
+    radiopacket[2] = m;  // motion is disabled
     radiopacket[3] = ',';
     radiopacket[4] = 'l';
     radiopacket[5] = ':';
-    radiopacket[6] = (char)motorLeft;
+    radiopacket[6] = l;
     radiopacket[7] = ',';
     radiopacket[8] = 'r';
     radiopacket[9] = ':';
-    radiopacket[10] = (char)motorRight;
-    radiopacket[11] = ';';   
-    Serial.print("Sending "); Serial.println(radiopacket);
-           if (radio.sendWithRetry(RECEIVER, radiopacket, strlen(radiopacket))) { //target node Id, message as string or byte array, message length
-              Serial.println("OK");
-              }
-           radio.receiveDone(); //put radio in RX mode
-           Serial.flush(); //make sure all serial data is clocked out before sleeping the MCU           
+    radiopacket[10] = r;
+    radiopacket[11] = ';';
+    //String packet(radiopacket);
+    //Serial.print("Sending "); Serial.println(packet);
+
+    //target node Id, message as string or byte array, message length
+    if (radio.sendWithRetry(RECEIVER, radiopacket, RADIO_PACKET_LEN)) {
+        Serial.println("OK");
+    }
+
+    radio.receiveDone(); //put radio in RX mode
+    Serial.flush(); //make sure all serial data is clocked out before sleeping the MCU
 }
 
 void setup() {
@@ -231,9 +252,11 @@ void setup() {
 
 void loop() {
     // First check if the DMS enable switch is on (red covered switch is in closed/down position):
-    dmsEnableState = digitalRead(dmsEnablePin);    
+    dmsEnableState = digitalRead(dmsEnablePin);
+
+    // No motion unless dead man button is held down continuously.
     if (dmsEnableState == LOW) {
-//        Serial.print("DMS is enabled.");
+        //Serial.print("DMS is enabled.");
         digitalWrite(dmsDisabledLED, LOW);  // turn off blue LED
         digitalWrite(haltLED, LOW);  //  turn off yellow LED
         // Now check if DMS button is depressed:
@@ -243,10 +266,10 @@ void loop() {
         if (dmsButtonState == HIGH) {
             digitalWrite(dmsDeadLED, LOW);  // turn off red LED
             digitalWrite(dmsAliveLED, HIGH);  // turn on green LED
-//            Serial.print("\t DMS button is depressed (stay alive)\n");
-            mode = (char)1; // m1 allows autonomous motion
-            motorLeft = (char)128; // the system should disregard this value in m1, we but we send 128 anyway
-            motorRight = (char)128; // the system should disregard this value in m1, but we send 128 anyway
+            //Serial.print("\t DMS button is depressed (stay alive)\n");
+            mode = AUTONOMOUS; // m1 allows autonomous motion
+            motorLeft = SPEED_STOP; // the system should disregard this value in m1, we but we send 128 anyway
+            motorRight = SPEED_STOP; // the system should disregard this value in m1, but we send 128 anyway
             sendControlOutput(mode, motorLeft, motorRight);
                      
         } else {
@@ -255,12 +278,14 @@ void loop() {
             digitalWrite(dmsAliveLED, LOW);  // turn off green LED
             digitalWrite(dmsDeadLED, HIGH);  // turn on red LED
 //            Serial.print("\t DMS button is open (Die)\n");
-            mode = (char)0; // m1 allows autonomous motion
-            motorLeft = (char)128; // the system should disregard this value in m0,  but we send 128 anyway
-            motorRight = (char)128; // the system should disregard this value in m0, but we send 128 anyway
+            mode = NO_MOTION; // m1 allows autonomous motion
+            motorLeft = SPEED_STOP; // the system should disregard this value in m0,  but we send 128 anyway
+            motorRight = SPEED_STOP; // the system should disregard this value in m0, but we send 128 anyway
             sendControlOutput(mode, motorLeft, motorRight);
         }
     }
+
+    // Motion is enabled and disabled by toggling the halt button (momentary press)
     if (dmsEnableState == HIGH) {
         // If the DMS is not enabled (red covered switch is uncovered and up), turn off DMS LEDs, turn on 'DMS OFF' indicator:
         digitalWrite(dmsDisabledLED, HIGH);  // turn on blue LED
@@ -273,105 +298,109 @@ void loop() {
             haltState = !haltState;
             delay(500);  // for debouncing the push button.  don't hold it down for more than half a second, push it once
         }
+
         digitalWrite(haltLED, haltState);
-        if (haltState == 1) {
+        if (haltState == HALTED) {
 //            Serial.print("\t HALT!");
-            mode = (char)0; // m1 allows autonomous motion
-            motorLeft = (char)128; // the system should disregard this value in m1, we but we send 128 anyway
-            motorRight = (char)128; // the system should disregard this value in m1, but we send 128 anyway
+            mode = NO_MOTION; // m1 allows autonomous motion
+
+            // The system should disregard this value in m1, we but we send 128 anyway.
+            motorLeft = SPEED_STOP;
+            motorRight = SPEED_STOP; // the system should disregard this value in m1, but we send 128 anyway
             sendControlOutput(mode, motorLeft, motorRight);
         }
         // Check if manual control switch is on (blue covered switch is up):
         manualControlState = digitalRead(manualControlPin);
+
+
         if (manualControlState == LOW) {
 //            Serial.print("\t Manual-Control Disabled. Continuous-Autonomous Enabled");
-            mode = (char)(!haltState);  // autonomous movement enabled (m:1) if not halted, but (m:0) if it is halted
-            motorLeft = (char)128; // the system should disregard this value in this mode, we but we send 128 anyway
-            motorRight = (char)128; // the system should disregard this value in this mode, but we send 128 anyway
+            mode = (unsigned char)(!haltState);  // autonomous movement enabled (m:1) if not halted, but (m:0) if it is halted
+            motorLeft = SPEED_STOP; // the system should disregard this value in this mode, we but we send 128 anyway
+            motorRight = SPEED_STOP; // the system should disregard this value in this mode, but we send 128 anyway
             sendControlOutput(mode, motorLeft, motorRight); 
         } 
         else {
 //            Serial.print("\t Manual Control Enabled.");
         }
+
         // IF DMS is off and manual control is on BUT the state is in HALT, disable motion
-        if (manualControlState == HIGH and haltState == HIGH) {
-            mode = (char)0; // m1 allows autonomous motion
-            motorLeft = (char)128; // the system should disregard this value in this mode, we but we send 128 anyway
-            motorRight = (char)128; // the system should disregard this value in this mode, but we send 128 anyway
+        if (manualControlState == HIGH and haltState == HALTED) {
+            mode = NO_MOTION; // m1 allows autonomous motion
+            motorLeft = SPEED_STOP; // the system should disregard this value in this mode, we but we send 128 anyway
+            motorRight = SPEED_STOP; // the system should disregard this value in this mode, but we send 128 anyway
             sendControlOutput(mode, motorLeft, motorRight);       
         }
+
         // If DMS is off and manual control switch is on and not halted, read 
         // and report joystick values:
-        if (manualControlState == HIGH and haltState == LOW) {
+        if (manualControlState == HIGH and haltState == NOT_HALTED) {
             joystickXValue = analogRead(joystickXPin);
             joystickYValue = analogRead(joystickYPin);
             int mappedX = map(joystickXValue, 0, 1023, 0, 255);
             int mappedY = map(joystickYValue, 0, 1023, 0, 255);
 
-//            float mathX = (mappedX - 128);
-//            float mathY = (mappedY - 128);            
-//            Serial.print("\tmappedX: ");
-//            Serial.print(mappedX);
-//            Serial.print("\tmappedY: ");
-//            Serial.print(mappedY);
-//            float toa = (mathY/mathX);
-//            Serial.print("\ttoa: ");
-//            Serial.print(toa);
-//            Serial.print("\ttheta: ");
-//            float theta = (atan(toa)*(57.2958));
-//            Serial.print(theta);
+            /*
+            float mathX = (mappedX - 128);
+            float mathY = (mappedY - 128);
+            Serial.print("\tmappedX: ");
+            Serial.print(mappedX);
+            Serial.print("\tmappedY: ");
+            Serial.print(mappedY);
+            float toa = (mathY/mathX);
+            Serial.print("\ttoa: ");
+            Serial.print(toa);
+            Serial.print("\ttheta: ");
+            float theta = (atan(toa)*(57.2958));
+            Serial.print(theta);
+            */
             
             
             // 19 joystick zones
             // central deadzone
             if ((mappedX > 124 and mappedX < 132) and (mappedY > 124 and mappedY < 132)) {
-//              Serial.print("\t Joystick is in deadzone \t");
-              motorLeft = 128;
-              motorRight = 128;
-            //now send this data over radio 
-            mode = (char)2;
-            motorLeft = (char)(motorLeft);
-            motorRight = (char)(motorRight);
-            sendControlOutput(mode, motorLeft, motorRight); 
-              }
+                //Serial.print("\t Joystick is in deadzone \t");
+                motorLeft = SPEED_STOP;
+                motorRight = SPEED_STOP;
+                //now send this data over radio
+                mode = HAND_CONTROL;
+                sendControlOutput(mode, motorLeft, motorRight);
             }
-            
-            // Quadrant FR
-            if ((mappedX >131) and (mappedY > 131)) {
-//              Serial.print("\t Q=FR\t");
-              float mathX = (mappedX - 128);
-              float mathY = (mappedY - 128);
-              if((mathY/mathX) < .194) {  // corresponds to angles: 79-90, ie hard right
-//                  Serial.print("\t going CW\t");
-                  motorLeft = mappedX;
-                  motorRight = map(mappedX, 128, 255, 128, 0);                  
-                }
-              else if ((mathY/mathX) < .424) {  //  corresponds to angles 67-79, ie above hard-right, pivot zone
-//                Serial.print("\t about to go CW\t");
-                motorLeft = map(mappedX, 128, 255, 128, 165);
+        }
+
+        // Quadrant FR
+        if ((mappedX >131) and (mappedY > 131)) {
+            //Serial.print("\t Q=FR\t");
+            float mathX = (mappedX - SPEED_STOP);
+            float mathY = (mappedY - SPEED_STOP);
+
+            // Corresponds to angles: 79-90, ie hard right
+            if((mathY / mathX) < 0.194) {
+                //Serial.print("\t going CW\t");
+                motorLeft = mappedX;
+                motorRight = map(mappedX, SPEED_STOP, 255, SPEED_STOP, 0);
+            } else if ((mathY/mathX) < 0.424) {  //  corresponds to angles 67-79, ie above hard-right, pivot zone
+                //Serial.print("\t about to go CW\t");
+                motorLeft = map(mappedX, SPEED_STOP, 255, 128, 165);
                 motorRight = 128;
-              }
-              else if ((mathY/mathX) < 1) {  //  corresponds to angles 45-67, tightest forward right arc
-//                Serial.print("\t FR, about to pivot");
-                motorLeft = map(mappedY, 128, 235, 128, 201);
-                motorRight = map(mappedY, 128, 235, 128, 149);
-              }
-              else if ((mathY/mathX) < 2.47) {  // corresponds to angles 22-45, forward/right arc
-//                Serial.print("\t FR");
+            } else if ((mathY/mathX) < 1) {  //  corresponds to angles 45-67, tightest forward right arc
+//              Serial.print("\t FR, about to pivot");
+                motorLeft = map(mappedY, SPEED_STOP, 235, 128, 201);
+                motorRight = map(mappedY, SPEED_STOP, 235, 128, 149);
+            } else if ((mathY/mathX) < 2.47) {  // corresponds to angles 22-45, forward/right arc
+                //Serial.print("\t FR");
                 motorLeft = map(mappedY, 128, 254, 128, 218);
                 motorRight = map(mappedY, 128, 255, 128, 192);
-              }
-              else  {
-//                Serial.print("\t FF-R");  //  corresponds to angles 0-22, 
+            } else {
+                //Serial.print("\t FF-R");  //  corresponds to angles 0-22,
                 motorLeft = map(mappedY, 128, 255, 128, 255);
                 motorRight = map(mappedY, 128, 255, 128, 255);
-                }
-            //now send this data over radio 
-            mode = (char)2;
-            motorLeft = (char)(motorLeft);
-            motorRight = (char)(motorRight);                           
-            sendControlOutput(mode, motorLeft, motorRight); 
             }
+
+            //now send this data over radio 
+            mode = HAND_CONTROL;
+            sendControlOutput(mode, motorLeft, motorRight); 
+        } // End forward right quadrant.
             
             // Quadrant BL
             if ((mappedX > 127) and (mappedY < 128)) {
@@ -381,9 +410,9 @@ void loop() {
               if((mathY/mathX) < .194) {
 //                  Serial.print("\t going CW\t");
                   motorLeft = mappedX;
-                  motorRight = map(mappedX, 128, 255, 128, 0);                     
+                  motorRight = map(mappedX, 128, 255, 128, 0);
                 }
-              else if ((mathY/mathX) < .424) {
+              else if ((mathY/mathX) < 0.424) {
 //                Serial.print("\t about to go CW\t");
                 motorLeft = map(mappedX, 128, 255, 128, 88);
                 motorRight = 128;
@@ -404,10 +433,8 @@ void loop() {
                 motorRight = map(mappedY, 128, 0, 128, 0);
                 }
             //now send this data over radio 
-            mode = (char)2;
-            motorLeft = (char)(motorLeft);
-            motorRight = (char)(motorRight);                           
-            sendControlOutput(mode, motorLeft, motorRight);                         
+            mode = HAND_CONTROL;
+            sendControlOutput(mode, motorLeft, motorRight);
             }
                     
             // Quadrant BR
@@ -442,9 +469,7 @@ void loop() {
                 motorRight = map(mappedY, 128, 0, 128, 0);
                 }
             //now send this data over radio 
-            mode = (char)2;
-            motorLeft = (char)(motorLeft);
-            motorRight = (char)(motorRight);                           
+            mode = HAND_CONTROL;
             sendControlOutput(mode, motorLeft, motorRight);                            
             }
                 
@@ -453,7 +478,7 @@ void loop() {
 //              Serial.print("\t Q=FL\t");
               float mathX = (128 - mappedX);
               float mathY = (mappedY - 128); 
-              if((mathY/mathX) < .199) {
+              if((mathY/mathX) < 0.199) {
 //                  Serial.print("\t going CCW\t");
                   motorLeft = mappedX;
                   motorRight = map(mappedX, 128, 0, 128, 255);                     
@@ -472,22 +497,17 @@ void loop() {
 //                Serial.print("\t FR");
                 motorLeft = map(mappedY, 128, 244, 128, 192);
                 motorRight = map(mappedY, 128, 244, 128, 218);
-              }
-              else  {
-//                Serial.print("\t FF-R");
+              } else {
+                //Serial.print("\t FF-R");
                 motorLeft = map(mappedY, 128, 255, 128, 255);
                 motorRight = map(mappedY, 128, 255, 128, 255);
-                }
+             }
+
             //now send this data over radio 
-            mode = (char)2;
-            motorLeft = (char)(motorLeft);
-            motorRight = (char)(motorRight);                           
+            mode = HAND_CONTROL;
             sendControlOutput(mode, motorLeft, motorRight); 
-              }                         
-            }
         }
-        
+    }
+}
 
-
-    
 
