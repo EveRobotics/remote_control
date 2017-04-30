@@ -186,153 +186,64 @@ void sendControlOutput(unsigned char m, unsigned char l, unsigned char r) {
     if (radio.sendWithRetry(RECEIVER, radiopacket, RADIO_PACKET_LEN)) {
 
 #if DEBUG_PRINT
-        Serial.println("OK");
+        Serial.println("OK\n");
 #endif
 
     } else {
-        Serial.print("Error sending");
+        Serial.print("Error sending\n");
     }
 
     radio.receiveDone(); //put radio in RX mode
     Serial.flush(); //make sure all serial data is clocked out before sleeping the MCU
 }
 
+const int ZERO_THRESHOLD = 5;
 
 void translateJoystickPositionToSpeed(int mappedX, int mappedY
         , unsigned char* motorLeft, unsigned char* motorRight) {
 
-    float mathX = 0.0;
-    float mathY = 0.0;
+    *motorLeft = SPEED_STOP;
+    *motorRight = SPEED_STOP;
 
-    // Quadrant FR
-    if ((mappedX > 131) && (mappedY > 131)) {
-        //Serial.print("\t Q=FR\t");
-        mathX = mappedX - SPEED_STOP;
-        mathY = mappedY - SPEED_STOP;
+    // Scale to +- 64
+    mappedX = (mappedX - SPEED_STOP) / 2;
+    mappedY = (mappedY - SPEED_STOP) / 2;
 
-        // Corresponds to angles: 79-90, ie hard right
-        if((mathY / mathX) < 0.194) {
-            //Serial.print("\t going CW\t");
-            *motorLeft = mappedX;
-            *motorRight = map(mappedX, SPEED_STOP, 255, SPEED_STOP, 0);
-        } else if ((mathY / mathX) < 0.424) {
-            // Corresponds to angles 67-79, ie above hard-right, pivot zone
-            //Serial.print("\t about to go CW\t");
-            *motorLeft = map(mappedX, SPEED_STOP, 255, SPEED_STOP, 165);
-            *motorRight = SPEED_STOP;
-        } else if ((mathY / mathX) < 1.0) {
-            // Corresponds to angles 45-67, tightest forward right arc
-            //Serial.print("\t FR, about to pivot");
-            *motorLeft = map(mappedY, SPEED_STOP, 235, SPEED_STOP, 201);
-            *motorRight = map(mappedY, SPEED_STOP, 235, SPEED_STOP, 149);
-        } else if ((mathY / mathX) < 2.47) {
-            // Corresponds to angles 22-45, forward/right arc.
-            //Serial.print("\t FR");
-            *motorLeft = map(mappedY, SPEED_STOP, 254, SPEED_STOP, 218);
-            *motorRight = map(mappedY, SPEED_STOP, 255, SPEED_STOP, 192);
-        } else {
-            //Serial.print("\t FF-R");  //  corresponds to angles 0-22,
-            *motorLeft = map(mappedY, SPEED_STOP, 255, SPEED_STOP, 255);
-            *motorRight = map(mappedY, SPEED_STOP, 255, SPEED_STOP, 255);
-        }
-    } // End forward right quadrant.
+    if(abs(mappedX) < ZERO_THRESHOLD) {
+        mappedX = 0;
+    }
 
-    // Quadrant BL
-    if ((mappedX > 127) && (mappedY < SPEED_STOP)) {
-        //Serial.print("\t Q=BL\t");
-        mathX = mappedX - SPEED_STOP;
-        mathY = SPEED_STOP - mappedY;
-        if((mathY / mathX) < 0.194) {
-            //Serial.print("\t going CW\t");
-            *motorLeft = mappedX;
-            *motorRight = map(mappedX, SPEED_STOP, 255, SPEED_STOP, 0);
-        } else if ((mathY / mathX) < 0.424) {
-            //Serial.print("\t about to go CW\t");
-            *motorLeft = map(mappedX, SPEED_STOP, 255, SPEED_STOP, 88);
-            *motorRight = SPEED_STOP;
-        } else if ((mathY / mathX) < 1) {
-            //Serial.print("\t BL-P, about to pivot");
-            *motorLeft = map(mappedY, SPEED_STOP, 36, SPEED_STOP, 54);
-            *motorRight = map(mappedY, SPEED_STOP, 36, SPEED_STOP, 106);
-        } else if ((mathY / mathX) < 2.47) {
-            //Serial.print("\t BL");
-            *motorLeft = map(mappedY, SPEED_STOP, 12, SPEED_STOP, 37);
-            *motorRight = map(mappedY, SPEED_STOP, 12, SPEED_STOP, 63);
-        } else  {
-            //Serial.print("\t BB-L");
-            *motorLeft = map(mappedY, SPEED_STOP, 0, SPEED_STOP, 0);
-            *motorRight = map(mappedY, SPEED_STOP, 0, SPEED_STOP, 0);
-        }
-    } // End Quadrant BL
+    if(abs(mappedY) < ZERO_THRESHOLD) {
+        mappedY = 0;
+    }
 
-    // Quadrant BR
-    if ((mappedX < SPEED_STOP) && (mappedY < SPEED_STOP)) {
+    if(mappedY > 0) {
+        // Convert X, Y to left right.
+        *motorLeft = *motorLeft + mappedY + mappedX;
+        *motorRight = *motorRight + mappedY - mappedX;
+    } else if(mappedY < 0) {
+        *motorLeft = *motorLeft + mappedY - mappedX;
+        *motorRight = *motorRight + mappedY + mappedX;
+    }
+
+    if(mappedY == 0 && mappedX != 0) {
+        // Zero turning radius turn:
+        *motorLeft = *motorLeft + mappedX;
+        *motorRight = *motorRight - mappedX;
+    }
 
 #if DEBUG_PRINT
-        Serial.print("\t Q=BR\n");
+    Serial.print("Joystick: X, Y: ");
+    Serial.print(mappedX);
+    Serial.print(", ");
+    Serial.print(mappedY);
+    Serial.print(", motor left, right: ");
+    Serial.print(*motorLeft);
+    Serial.print(", ");
+    Serial.print(*motorRight);
+    Serial.print("\n");
 #endif
 
-        mathX = SPEED_STOP - mappedX;
-        mathY = SPEED_STOP - mappedY;
-
-        if((mathY / mathX) < 0.018) {
-            //Serial.print("\t going CCW\t");
-            *motorLeft = mappedX;
-            *motorRight = map(mappedX, SPEED_STOP, 0, SPEED_STOP, 255);
-        } else if ((mathY / mathX) < 0.424) {
-            //Serial.print("\t about to go CCW\t");
-            *motorLeft = map(mappedX, SPEED_STOP, 31, SPEED_STOP, 88);
-            *motorRight = SPEED_STOP;
-        } else if ((mathY / mathX) < 1.0) {
-            //Serial.print("\t BR-P, about to pivot");
-            *motorLeft = map(mappedY, SPEED_STOP, 54, SPEED_STOP, 106);
-            *motorRight = map(mappedY, SPEED_STOP, 54, SPEED_STOP, 54);
-        } else if ((mathY / mathX) < 2.47) {
-            //Serial.print("\t BR");
-            *motorLeft = map(mappedY, SPEED_STOP, 27, SPEED_STOP, 63);
-            *motorRight = map(mappedY, SPEED_STOP, 27, SPEED_STOP, 37);
-        } else {
-            //Serial.print("\t BB-R");
-            *motorLeft = map(mappedY, SPEED_STOP, 0, SPEED_STOP, 0);
-            *motorRight = map(mappedY, SPEED_STOP, 0, SPEED_STOP, 0);
-        }
-    } // End Quadrant BR.
-
-    // Quadrant FL
-    if((mappedX < SPEED_STOP) && (mappedY > 127)) {
-
-#if DEBUG_PRINT
-        Serial.print("\t Q=FL\t");
-#endif
-
-        float mathX = SPEED_STOP - mappedX;
-        float mathY = mappedY - SPEED_STOP;
-        if((mathY/mathX) < 0.199) {
-
-#if DEBUG_PRINT
-            //Serial.print("\t going CCW\t");
-#endif
-
-            *motorLeft = mappedX;
-            *motorRight = map(mappedX, SPEED_STOP, 0, SPEED_STOP, 255);
-        } else if ((mathY/mathX) < 0.424) {
-              //Serial.print("\t about to go CW\t");
-              *motorLeft = SPEED_STOP;
-              *motorRight = map(mappedX, SPEED_STOP, 0, SPEED_STOP, 165);
-          } else if ((mathY/mathX) < 1.0) {
-              //Serial.print("\t FR, about to pivot");
-              *motorLeft = map(mappedY, SPEED_STOP, 212, SPEED_STOP, 149);
-              *motorRight = map(mappedY, SPEED_STOP, 212, SPEED_STOP, 201);
-          } else if ((mathY / mathX) < 2.47) {
-              //Serial.print("\t FR");
-              *motorLeft = map(mappedY, SPEED_STOP, 244, SPEED_STOP, 192);
-              *motorRight = map(mappedY, SPEED_STOP, 244, SPEED_STOP, 218);
-          } else {
-              //Serial.print("\t FF-R");
-              *motorLeft = map(mappedY, SPEED_STOP, 255, SPEED_STOP, 255);
-              *motorRight = map(mappedY, SPEED_STOP, 255, SPEED_STOP, 255);
-         }
-    } // End Quadrant FL.
 }
 
 
@@ -449,15 +360,6 @@ void loop() {
 
             translateJoystickPositionToSpeed(joystickX, joystickY
                     , &motorLeft, &motorRight);
-
-            // 19 joystick zone, central dead-zone
-            if ((joystickX > 124 && joystickX < 132)
-                    && (joystickY > 124 && joystickY < 132)) {
-
-                //Serial.print("\t Joystick is in dead-zone \t");
-                motorLeft = SPEED_STOP;
-                motorRight = SPEED_STOP;
-            }
         }
 
     }
