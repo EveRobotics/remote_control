@@ -118,6 +118,8 @@
 #include <RFM69.h>    //get it here: https://www.github.com/lowpowerlab/rfm69
 #include <SPI.h>
 
+#define DEBUG_PRINT 1
+
 const unsigned char NETWORKID = 100; // must be the same for all nodes (0-255)
 const unsigned char NODEID    = 2;   // my node ID (0-255)
 const unsigned char RECEIVER  = 255;
@@ -171,16 +173,24 @@ void sendControlOutput(unsigned char m, unsigned char l, unsigned char r) {
     radiopacket[10] = r; // right motor speed
     radiopacket[11] = ';';
 
+#if DEBUG_PRINT
     Serial.print("Sending: ");
     for(int i = 0; i < RADIO_PACKET_LEN; i++) {
         Serial.print(radiopacket[i]);
         Serial.print(",");
     }
     Serial.print("\n");
+#endif
 
     //target node Id, message as string or byte array, message length
     if (radio.sendWithRetry(RECEIVER, radiopacket, RADIO_PACKET_LEN)) {
+
+#if DEBUG_PRINT
         Serial.println("OK");
+#endif
+
+    } else {
+        Serial.print("Error sending");
     }
 
     radio.receiveDone(); //put radio in RX mode
@@ -257,7 +267,11 @@ void translateJoystickPositionToSpeed(int mappedX, int mappedY
 
     // Quadrant BR
     if ((mappedX < SPEED_STOP) && (mappedY < SPEED_STOP)) {
+
+#if DEBUG_PRINT
         Serial.print("\t Q=BR\n");
+#endif
+
         mathX = SPEED_STOP - mappedX;
         mathY = SPEED_STOP - mappedY;
 
@@ -285,15 +299,23 @@ void translateJoystickPositionToSpeed(int mappedX, int mappedY
     } // End Quadrant BR.
 
     // Quadrant FL
-    if ((mappedX < SPEED_STOP) && (mappedY > 127)) {
-          //Serial.print("\t Q=FL\t");
-          float mathX = SPEED_STOP - mappedX;
-          float mathY = mappedY - SPEED_STOP;
-          if((mathY/mathX) < 0.199) {
-              //Serial.print("\t going CCW\t");
-              *motorLeft = mappedX;
-              *motorRight = map(mappedX, SPEED_STOP, 0, SPEED_STOP, 255);
-          } else if ((mathY/mathX) < 0.424) {
+    if((mappedX < SPEED_STOP) && (mappedY > 127)) {
+
+#if DEBUG_PRINT
+        Serial.print("\t Q=FL\t");
+#endif
+
+        float mathX = SPEED_STOP - mappedX;
+        float mathY = mappedY - SPEED_STOP;
+        if((mathY/mathX) < 0.199) {
+
+#if DEBUG_PRINT
+            //Serial.print("\t going CCW\t");
+#endif
+
+            *motorLeft = mappedX;
+            *motorRight = map(mappedX, SPEED_STOP, 0, SPEED_STOP, 255);
+        } else if ((mathY/mathX) < 0.424) {
               //Serial.print("\t about to go CW\t");
               *motorLeft = SPEED_STOP;
               *motorRight = map(mappedX, SPEED_STOP, 0, SPEED_STOP, 165);
@@ -337,7 +359,7 @@ void setup() {
     delay(100);
   
     // Initialize radio
-    radio.initialize(FREQUENCY,NODEID,NETWORKID);
+    radio.initialize(FREQUENCY, NODEID, NETWORKID);
     if (IS_RFM69HCW) {
         radio.setHighPower();    // Only for RFM69HCW & HW!
     }
@@ -347,12 +369,14 @@ void setup() {
     Serial.println("\nTransmitting at 915 MHz");
 }
 
+bool haltState = HALTED; // Variable for current halt state.
+
+// Arduino main loop.
 void loop() {
 
     unsigned char mode = NO_MOTION;
     unsigned char motorLeft = SPEED_STOP;
     unsigned char motorRight = SPEED_STOP;
-    bool haltState = HALTED; // Variable for current halt state.
 
     // Check if the DMS enable switch is on (red covered switch is in closed/down position):
     // Variable for whether the DMS is enabled.
@@ -440,6 +464,7 @@ void loop() {
 
     // Send the motor speed and mode data out via the radio.
     sendControlOutput(mode, motorLeft, motorRight);
+    delay(90); // This should match the loop timing for the spacial controller.
 }
 
 
