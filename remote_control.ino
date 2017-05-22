@@ -35,51 +35,16 @@
  *          in place. So, when approaching the the 9 o'clock position on the 
  *          joystick, just prior to entering a spin-in-place motion, the left 
  *          motors will stop moving while the right motors continue to move, 
- *          creating a pivoting motion (and vice-versa for the other direciton).
+ *          creating a pivoting motion (and vice-versa for the other direction).
  *          Initial mapping (v1.0) of the joystick inputs to the output command
  *          values for the motors was based primarily on intuition and will need
  *          to undergo field testing/validation and likely will need adjustment.
- *          The rationale for joystick mapping in v1.0 is described below.
- *
- *  Joystick Mapping 
- *    The space of possible joystick positions was divided into 19 sectors (0-18).  
- *    Because the joystick may not always return perfecly to center, the center
- *    point is expanded into a small central 'dead-zone' to signal no movement.
- *    We will call this central zone 'sector 0', then divide the remaining 
- *    joystick space into 18 radial zones (like pizza slices), numbering the
- *    slices starting from sector 1 at the 12:00 position and counting up in
- *    the CW direction. Sectors are defined by their boundry angles, and to 
- *    determine which sector the joystick is in we take the inverse tangent 
- *    of the ratio of the X and Y joystick values to give us the joystick angle.
- *    Note:The X and Y pots are mapped from (0,1023) to (0,255).
- *    For this chart, 12:00=0_degrees, 3:00=90, 6:00=180, and 9:00=270.
- *
- *    Sector     JoystickAngles  JoystickRange             Output(L,R)
- *    0          na               X:125-129, Y:125-129      L:128,R:128
- *    1           0-22
- *    2          23-45
- *    3          46-67
- *    4          68-79
- *    5          80-90
- *    6
- *    7
- *    8
- *    9
- *    10
- *    11
- *    12
- *    13
- *    14
- *    15
- *    16
- *    17
- *    18
  *
  * Remote Controller - Physical Layout & Operation
  *  The controller has 3 switches, 1 momentary push button, 1 joystick, 4 LEDs.
  *    Power (On/Off) Switch - located in center of controller.
  *    Dead-Man-Switch(DMS) Enable/Disable Switch- this switch is located on top-right 
- *      and has a large red cover to allow quicky putting it in the down-position.
+ *      and has a large red cover to allow quickly putting it in the down-position.
  *      When this switch is down, DMS mode is enabled. The controller will transmit 
  *      "m:0"  UNLESS the push button is held down, in which case it transmits  "m:1".
  *      Holding down the button when transmitting "m:1" the green LED will be lit.  
@@ -218,15 +183,14 @@ void translateJoystickPositionToSpeed(int mappedX, int mappedY
     }
 
     if(mappedY > 0) {
-        // Convert X, Y to left right.
+        // Convert X, Y to left right for forward motion.
         *motorLeft = *motorLeft + mappedY + mappedX;
         *motorRight = *motorRight + mappedY - mappedX;
     } else if(mappedY < 0) {
+        // For reverse motion.
         *motorLeft = *motorLeft + mappedY - mappedX;
         *motorRight = *motorRight + mappedY + mappedX;
-    }
-
-    if(mappedY == 0 && mappedX != 0) {
+    } else {
         // Zero turning radius turn:
         *motorLeft = *motorLeft + mappedX;
         *motorRight = *motorRight - mappedX;
